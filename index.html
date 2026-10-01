@@ -223,7 +223,10 @@ table.combo input.div-input.changed{background:var(--warn-soft);border-color:var
 .rh-chart .axis-t{fill:var(--text-faint);font-family:var(--font-mono);font-size:10.5px;}
 .rh-chart .seg-t{font-family:var(--font-mono);font-size:11px;font-weight:600;fill:#fff;pointer-events:none;}
 .rh-chart .col-hit{fill:transparent;cursor:pointer;}
-.rh-chart .col-hit:hover, .rh-chart .col-hit.on{fill:rgba(34,27,32,.05);}
+.rh-chart .col-hit:focus{outline:none;}
+.rh-chart .cross-l{stroke:var(--text-faint);stroke-width:1;stroke-dasharray:3 3;pointer-events:none;}
+.rh-chart .end-t{font-family:var(--font-mono);font-size:11px;font-weight:600;fill:var(--text);font-variant-numeric:tabular-nums;}
+.rh-chart .end-t .end-m{fill:var(--text-faint);font-weight:500;font-size:10px;}
 .rh-tip{position:fixed;z-index:150;pointer-events:none;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:12px;box-shadow:0 8px 24px rgba(60,30,45,.15);min-width:190px;}
 .rh-tip .d{font-weight:600;margin-bottom:6px;}
 .rh-tip .r{display:flex;justify-content:space-between;gap:14px;font-variant-numeric:tabular-nums;}
@@ -368,7 +371,7 @@ table.combo input.div-input.changed{background:var(--warn-soft);border-color:var
           <div class="rh-legend" id="rhLegend"></div>
           <div class="rh-scroll" id="rhScroll"><div id="rhChart" class="rh-chart"></div></div>
           <div class="rh-tip" id="rhTip" hidden></div>
-          <p class="hint">Cada coluna usa o último UPDATE feito no dia (horário de Brasília). Simulações não entram no gráfico. "Post Div." usa os dividendos gravados naquele UPDATE. Marque Current e Post Div. juntos para ver as duas colunas lado a lado: Current em tom claro, Post Div. na cor normal.</p>
+          <p class="hint">Cada ponto é o último UPDATE feito no dia (horário de Brasília). Simulações não entram no gráfico. "Post Div." usa os dividendos gravados naquele UPDATE. Marque Current e Post Div. juntos para ver as duas bases no mesmo gráfico: Current em tom claro, Post Div. na cor normal. O eixo vertical acompanha a faixa dos dados.</p>
           <details class="rh-table">
             <summary>Ver os valores em tabela</summary>
             <div class="table-wrap"><table id="rhTable"></table></div>
@@ -744,71 +747,80 @@ function renderRatioHist(){
   const tbl = $('rhTable');
   if(!days.length){
     box.innerHTML = `<div class="rh-empty">Ainda não há atualizações para montar o gráfico.<br>Clique em <strong>UPDATE</strong> e o fechamento de hoje aparece aqui.</div>`;
-    tbl.innerHTML = ''; return;
+    $('rhLegend').innerHTML = ''; tbl.innerHTML = ''; return;
   }
   const css = getComputedStyle(document.documentElement);
   const BASE = { y: css.getPropertyValue('--yd').trim(), a: css.getPropertyValue('--accent').trim() };
   const LIGHT = { y: '#7F9BE6', a: '#E57AA0' };   // tons claros validados (daltonismo e contraste)
+  const SURF = css.getPropertyValue('--surface').trim() || '#FFFFFF';
   const modes = ['cur','post'].filter(m => RH_SEL[m]);
   const both = modes.length === 2;
   const colorOf = m => (both && m === 'cur') ? LIGHT : BASE;
   const NAME = { cur: 'Current', post: 'Post Div.' };
-  // texto dentro do segmento: branco ou tinta escura conforme a luminância da cor
-  const lum = h => { const c=[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)/255).map(v=>v<=0.03928?v/12.92:((v+0.055)/1.055)**2.4); return .2126*c[0]+.7152*c[1]+.0722*c[2]; };
-  const ink = h => (1.05/(lum(h)+.05)) >= 4.5 ? '#FFFFFF' : '#221B20';
 
   // legenda
   $('rhLegend').innerHTML = both
     ? `<span><i style="background:${LIGHT.y}"></i>Yduqs · Current</span><span><i style="background:${LIGHT.a}"></i>Afya · Current</span><span><i style="background:${BASE.y}"></i>Yduqs · Post Div.</span><span><i style="background:${BASE.a}"></i>Afya · Post Div.</span>`
     : `<span><i style="background:${BASE.y}"></i>Yduqs' Shareholders</span><span><i style="background:${BASE.a}"></i>Afya's Shareholders</span><span class="muted">· ${NAME[modes[0]]}</span>`;
 
+  // séries: Yduqs e Afya para cada base marcada
+  const series = [];
+  modes.forEach(m => ['y','a'].forEach(e => series.push({ m, e, color: colorOf(m)[e], name: `${e==='y'?'Yduqs':'Afya'}${both?' · '+NAME[m]:''}`, vals: days.map(d => d[m][e]) })));
+
+  // eixo y: faixa dos dados com folga, arredondada em 5 p.p.
+  const all = series.flatMap(s => s.vals);
+  let lo = Math.floor((Math.min(...all)*100 - 3)/5)*5, hi = Math.ceil((Math.max(...all)*100 + 3)/5)*5;
+  lo = Math.max(0, lo); hi = Math.min(100, hi);
+  const step = (hi - lo) > 40 ? 10 : 5;
+
   const avail = Math.max(280, $('rhScroll').clientWidth);
-  const padL = 40, padR = 8, padT = 10, padB = 28, H = 280;
-  const PAIR_GAP = 4;
-  const minSlot = both ? 58 : 34;
-  const W = Math.max(avail, padL + padR + days.length*minSlot);
+  const endLabelW = 92;
+  const padL = 40, padR = endLabelW, padT = 14, padB = 28, H = 280;
+  const minSlot = avail < 560 ? Math.max(8, Math.min(14, (avail - padL - padR - 24) / Math.max(1, days.length-1))) : 44;   // no celular os pontos se aproximam antes de rolar
+  const W = Math.max(avail, padL + padR + Math.max(1, days.length-1)*minSlot + 24);
   const plotW = W - padL - padR, plotH = H - padT - padB;
-  const slot = plotW / days.length;
-  const k = modes.length;
-  const bw = Math.min(56, Math.max(both ? 12 : 14, (slot*0.66 - (k-1)*PAIR_GAP) / k));
-  const groupW = k*bw + (k-1)*PAIR_GAP;
-  const y = v => padT + (1 - v) * plotH;
-  const GAP = 2, R = 4;
-  const labelEvery = Math.ceil(days.length / Math.max(1, Math.floor(plotW/52)));
+  const n = days.length;
+  const xAt = i => n === 1 ? padL + plotW/2 : padL + 12 + i * ((plotW - 24) / (n - 1));
+  const y = v => padT + (1 - ((v*100 - lo) / (hi - lo))) * plotH;
+  const labelEvery = Math.ceil(n / Math.max(1, Math.floor(plotW/56)));
+
   let g = '';
-  for(const t of [0,.25,.5,.75,1]){
-    g += `<line class="grid-l" x1="${padL}" x2="${W-padR}" y1="${y(t)}" y2="${y(t)}"/>`;
-    g += `<text class="axis-t" x="${padL-6}" y="${y(t)+3.5}" text-anchor="end">${t*100}%</text>`;
+  for(let t = lo; t <= hi + 1e-9; t += step){
+    g += `<line class="grid-l" x1="${padL}" x2="${W-padR+6}" y1="${y(t/100)}" y2="${y(t/100)}"/>`;
+    g += `<text class="axis-t" x="${padL-6}" y="${y(t/100)+3.5}" text-anchor="end">${t}%</text>`;
   }
-  // coluna com cantos de 4px apenas nas extremidades externas
-  const segPath = (x, y0, y1, roundTop, roundBot) => {
-    const h = y1 - y0; if(h <= 0) return '';
-    const rt = roundTop ? Math.min(R, h/2, bw/2) : 0, rb = roundBot ? Math.min(R, h/2, bw/2) : 0;
-    return `M${x},${y0+rt} Q${x},${y0} ${x+rt},${y0} L${x+bw-rt},${y0} Q${x+bw},${y0} ${x+bw},${y0+rt} L${x+bw},${y1-rb} Q${x+bw},${y1} ${x+bw-rb},${y1} L${x+rb},${y1} Q${x},${y1} ${x},${y1-rb} Z`;
-  };
-  const fits = bw >= 34;
-  days.forEach((d,i)=>{
-    const cx = padL + slot*i + slot/2, gx = cx - groupW/2;
-    modes.forEach((m, j)=>{
-      const v = d[m], col = colorOf(m), x = gx + j*(bw + PAIR_GAP), mx = x + bw/2;
-      // Afya na base, Yduqs no topo; 2px de superfície entre os segmentos
-      const yTopA = y(v.a), yBase = y(0), yTopY = y(1), yBotY = yTopA - GAP;
-      g += `<path d="${segPath(x, yTopA, yBase, false, true)}" fill="${col.a}"/>`;
-      g += `<path d="${segPath(x, yTopY, yBotY, true, false)}" fill="${col.y}"/>`;
-      if(fits && (yBase - yTopA) > 18) g += `<text class="seg-t" style="fill:${ink(col.a)}" x="${mx}" y="${(yTopA+yBase)/2+4}" text-anchor="middle">${fmt(v.a*100,1)}%</text>`;
-      if(fits && (yBotY - yTopY) > 18) g += `<text class="seg-t" style="fill:${ink(col.y)}" x="${mx}" y="${(yTopY+yBotY)/2+4}" text-anchor="middle">${fmt(v.y*100,1)}%</text>`;
-    });
-    if(i % labelEvery === 0 || i === days.length-1) g += `<text class="axis-t" x="${cx}" y="${H-8}" text-anchor="middle">${dayLabel(d.k)}</text>`;
-    const aria = modes.map(m=>`${NAME[m]}: Yduqs ${fmt(d[m].y*100,1)}%, Afya ${fmt(d[m].a*100,1)}%`).join('; ');
-    g += `<rect class="col-hit" data-i="${i}" x="${padL+slot*i}" y="${padT}" width="${slot}" height="${plotH}" tabindex="0" aria-label="${dayLabel(d.k)}. ${aria}"/>`;
+  // rótulos do eixo x contados a partir do último dia, para nunca sobrepor
+  days.forEach((d,i)=>{ if((n-1-i) % labelEvery === 0) g += `<text class="axis-t" x="${xAt(i)}" y="${H-8}" text-anchor="middle">${dayLabel(d.k)}</text>`; });
+  g += `<line id="rhCross" class="cross-l" x1="0" x2="0" y1="${padT}" y2="${padT+plotH}" visibility="hidden"/>`;
+
+  // linhas de 2px; marcadores de 8px com anel da cor da superfície
+  series.forEach(s => {
+    const pts = s.vals.map((v,i)=> `${xAt(i).toFixed(1)},${y(v).toFixed(1)}`);
+    if(n > 1) g += `<polyline points="${pts.join(' ')}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    const r = n > 30 ? 0 : 4;
+    if(r) s.vals.forEach((v,i)=> g += `<circle cx="${xAt(i)}" cy="${y(v)}" r="${r}" fill="${s.color}" stroke="${SURF}" stroke-width="2"/>`);
   });
-  box.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Relação de troca no fechamento de cada dia, colunas 100% empilhadas">${g}</svg>`;
+  // rótulos diretos no último ponto (afastados se colidirem)
+  const ends = series.map(s => ({ s, v: s.vals[n-1], yy: y(s.vals[n-1]) })).sort((a,b)=> a.yy - b.yy);
+  for(let i=1;i<ends.length;i++) if(ends[i].yy - ends[i-1].yy < 13) ends[i].yy = ends[i-1].yy + 13;
+  ends.forEach(e => {
+    const lx = xAt(n-1) + 9;
+    g += `<text class="end-t" x="${lx}" y="${e.yy+4}"><tspan style="fill:${e.s.color}">●</tspan> ${fmt(e.v*100,1)}%${both?` <tspan class="end-m">${e.s.m==='cur'?'Cur.':'Post'}</tspan>`:''}</text>`;
+  });
+  // áreas de toque: uma faixa vertical por dia
+  days.forEach((d,i)=>{
+    const x0 = n===1 ? padL : (i===0 ? padL : (xAt(i-1)+xAt(i))/2);
+    const x1 = n===1 ? padL+plotW : (i===n-1 ? padL+plotW : (xAt(i)+xAt(i+1))/2);
+    const aria = modes.map(m=>`${NAME[m]}: Yduqs ${fmt(d[m].y*100,1)}%, Afya ${fmt(d[m].a*100,1)}%`).join('; ');
+    g += `<rect class="col-hit" data-i="${i}" x="${x0}" y="${padT}" width="${x1-x0}" height="${plotH}" tabindex="0" aria-label="${dayLabel(d.k)}. ${aria}"/>`;
+  });
+  box.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Relação de troca no fechamento de cada dia, gráfico de linhas">${g}</svg>`;
   $('rhScroll').scrollLeft = $('rhScroll').scrollWidth;
 
-  const tip = $('rhTip');
+  const tip = $('rhTip'), cross = box.querySelector('#rhCross');
   const show = (el, evt) => {
-    box.querySelectorAll('.col-hit.on').forEach(n=>n.classList.remove('on')); el.classList.add('on');
-    const d = days[+el.dataset.i];
+    const i = +el.dataset.i, d = days[i];
+    cross.setAttribute('x1', xAt(i)); cross.setAttribute('x2', xAt(i)); cross.setAttribute('visibility','visible');
     tip.innerHTML = `<div class="d">${dayLabel(d.k)}/${d.k.slice(0,4)}</div>` + modes.map(m=>{
       const v = d[m], col = colorOf(m);
       return `<div class="h">${NAME[m]}</div>
@@ -823,7 +835,7 @@ function renderRatioHist(){
     tip.style.left = Math.max(8,left)+'px';
     tip.style.top = Math.max(8, rect.top + 20)+'px';
   };
-  const hide = () => { tip.hidden = true; box.querySelectorAll('.col-hit.on').forEach(n=>n.classList.remove('on')); };
+  const hide = () => { tip.hidden = true; cross.setAttribute('visibility','hidden'); };
   box.querySelectorAll('.col-hit').forEach(el=>{
     el.addEventListener('mousemove', e=> show(el, e));
     el.addEventListener('mouseleave', hide);
