@@ -47,9 +47,11 @@ async function fetchYduqs(token: string, ticker: string, sharesMn: number | null
   const q = j.results && j.results[0];
   if (!q) throw new Error("ticker não encontrado");
   const px = q.regularMarketPrice;
-  const mc = sharesMn ? px * sharesMn : (q.marketCap ? q.marketCap / 1e6 : null);
-  if (!mc) throw new Error("market cap indisponível");
-  return { px, mc };
+  if (!px) throw new Error("cotação indisponível");
+  if (sharesMn) return { px, mc: px * sharesMn, shares: sharesMn, sharesFonte: "configurado" };
+  const mc = q.marketCap ? q.marketCap / 1e6 : null;
+  if (!mc) throw new Error("market cap indisponível: informe as ações em Configurações");
+  return { px, mc, shares: mc / px, sharesFonte: "implícito (market cap brapi ÷ preço)" };
 }
 
 async function fetchAfya(token: string, ticker: string, sharesMn: number | null) {
@@ -61,9 +63,11 @@ async function fetchAfya(token: string, ticker: string, sharesMn: number | null)
   ]);
   const px = q && q.c ? q.c : null;
   const shares = sharesMn || (p && p.shareOutstanding) || null;
-  const usd = (px && shares) ? px * shares : (p && p.marketCapitalization) || null;
+  const sharesFonte = sharesMn ? "configurado" : "Finnhub";
+  if (px && shares) return { px, usd: px * shares, shares, sharesFonte };
+  const usd = (p && p.marketCapitalization) || null;
   if (!usd) throw new Error("cotação/market cap indisponível");
-  return { px, usd };
+  return { px, usd, shares: px ? usd / px : null, sharesFonte: "implícito (market cap Finnhub ÷ preço)" };
 }
 
 Deno.serve(async (req) => {
@@ -110,7 +114,7 @@ Deno.serve(async (req) => {
   // se alguma fonte falhou, mantém o último valor conhecido
   const { data: ultimo } = await admin.from("historico").select("*").eq("tipo", "update")
     .order("created_at", { ascending: false }).limit(1).maybeSingle();
-  const fallback = ultimo ?? { fx: 5.2034, fx_data: null, fx_fonte: "referência", yd_mc: 2853.3, yd_px: null, af_usd: 5764.3 / 5.2034, af_px: null };
+  const fallback = ultimo ?? { fx: 5.2034, fx_data: null, fx_fonte: "referência", yd_mc: 2853.3, yd_px: null, af_usd: 5764.3 / 5.2034, af_px: null, yd_shares: null, yd_shares_fonte: null, af_shares: null, af_shares_fonte: null };
   if (rFx.status === "rejected" || rYd.status === "rejected" || rAf.status === "rejected") {
     if (!ultimo) erros.push("sem atualização anterior: usados os valores de referência");
   }
@@ -124,8 +128,12 @@ Deno.serve(async (req) => {
     fx_fonte: rFx.status === "fulfilled" ? rFx.value.fonte : fallback.fx_fonte,
     yd_mc: rYd.status === "fulfilled" ? rYd.value.mc : fallback.yd_mc,
     yd_px: rYd.status === "fulfilled" ? rYd.value.px : fallback.yd_px,
+    yd_shares: rYd.status === "fulfilled" ? rYd.value.shares : fallback.yd_shares,
+    yd_shares_fonte: rYd.status === "fulfilled" ? rYd.value.sharesFonte : fallback.yd_shares_fonte,
     af_usd: rAf.status === "fulfilled" ? rAf.value.usd : fallback.af_usd,
     af_px: rAf.status === "fulfilled" ? rAf.value.px : fallback.af_px,
+    af_shares: rAf.status === "fulfilled" ? rAf.value.shares : fallback.af_shares,
+    af_shares_fonte: rAf.status === "fulfilled" ? rAf.value.sharesFonte : fallback.af_shares_fonte,
     div_y: Number.isFinite(body.div_y) ? body.div_y : divPadrao.y,
     div_a: Number.isFinite(body.div_a) ? body.div_a : divPadrao.a,
     erros,
