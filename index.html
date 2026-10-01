@@ -223,7 +223,11 @@ table.combo input.div-input.changed{background:var(--warn-soft);border-color:var
 .rh-chart .axis-t{fill:var(--text-faint);font-family:var(--font-mono);font-size:10.5px;}
 .rh-chart .seg-t{font-family:var(--font-mono);font-size:11px;font-weight:600;fill:#fff;pointer-events:none;}
 .rh-chart .col-hit{fill:transparent;cursor:pointer;}
+.rh-ctrls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.seg-radio .seg-btn::before{display:none;}
+.seg-radio .seg-btn.active{background:var(--accent);color:#fff;box-shadow:none;}
 .rh-chart .col-hit:focus{outline:none;}
+.rh-chart.cols .col-hit:hover, .rh-chart.cols .col-hit.on{fill:rgba(34,27,32,.05);}
 .rh-chart .cross-l{stroke:var(--text-faint);stroke-width:1;stroke-dasharray:3 3;pointer-events:none;}
 .rh-chart .end-t{font-family:var(--font-mono);font-size:11px;font-weight:600;fill:var(--text);font-variant-numeric:tabular-nums;}
 .rh-chart .end-t .end-m{fill:var(--text-faint);font-weight:500;font-size:10px;}
@@ -363,15 +367,21 @@ table.combo input.div-input.changed{background:var(--warn-soft);border-color:var
         <div class="card" id="ratioHistCard">
           <div class="card-title" style="justify-content:space-between;">
             <span style="display:flex;align-items:center;gap:8px;"><span class="dot"></span>Histórico da relação de troca · fechamento diário</span>
-            <div class="seg" role="group" aria-label="Base da relação de troca (pode marcar as duas)">
+            <div class="rh-ctrls">
+              <div class="seg seg-radio" role="radiogroup" aria-label="Tipo de gráfico">
+                <button type="button" class="seg-btn active" role="radio" data-rh-type="line" aria-checked="true">Linhas</button>
+                <button type="button" class="seg-btn" role="radio" data-rh-type="cols" aria-checked="false">Colunas</button>
+              </div>
+              <div class="seg" role="group" aria-label="Base da relação de troca (pode marcar as duas)">
               <button type="button" class="seg-btn active" data-rh-mode="cur" aria-pressed="true">Current</button>
               <button type="button" class="seg-btn" data-rh-mode="post" aria-pressed="false">Post Div.</button>
+              </div>
             </div>
           </div>
           <div class="rh-legend" id="rhLegend"></div>
           <div class="rh-scroll" id="rhScroll"><div id="rhChart" class="rh-chart"></div></div>
           <div class="rh-tip" id="rhTip" hidden></div>
-          <p class="hint">Cada ponto é o último UPDATE feito no dia (horário de Brasília). Simulações não entram no gráfico. "Post Div." usa os dividendos gravados naquele UPDATE. Marque Current e Post Div. juntos para ver as duas bases no mesmo gráfico: Current em tom claro, Post Div. na cor normal. O eixo vertical acompanha a faixa dos dados.</p>
+          <p class="hint" id="rhHint">Cada ponto é o último UPDATE feito no dia (horário de Brasília). Simulações não entram no gráfico. "Post Div." usa os dividendos gravados naquele UPDATE. Com Current e Post Div. marcados, Current aparece em tom claro e Post Div. na cor normal. O eixo vertical acompanha a faixa dos dados.</p>
           <details class="rh-table">
             <summary>Ver os valores em tabela</summary>
             <div class="table-wrap"><table id="rhTable"></table></div>
@@ -726,6 +736,7 @@ function renderCfg(){
 
 /* ---------- gráfico: relação de troca no fechamento de cada dia ---------- */
 let RH_SEL = { cur: true, post: false };
+let RH_TYPE = 'line';
 const TZ = 'America/Sao_Paulo';
 const dayKey = iso => new Intl.DateTimeFormat('en-CA',{timeZone:TZ,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(iso));
 const dayLabel = k => { const [y,m,d] = k.split('-'); return `${d}/${m}`; };
@@ -742,7 +753,104 @@ function dailyClose(){
     return { k, r, cur:{y:c.rYCur, a:c.rACur}, post:{y:c.rYPost, a:c.rAPost} };
   });
 }
-function renderRatioHist(){
+function renderRatioCols(){
+  const box = $('rhChart'), days = dailyClose();
+  const tbl = $('rhTable');
+  if(!days.length){
+    box.innerHTML = `<div class="rh-empty">Ainda não há atualizações para montar o gráfico.<br>Clique em <strong>UPDATE</strong> e o fechamento de hoje aparece aqui.</div>`;
+    tbl.innerHTML = ''; return;
+  }
+  const css = getComputedStyle(document.documentElement);
+  const BASE = { y: css.getPropertyValue('--yd').trim(), a: css.getPropertyValue('--accent').trim() };
+  const LIGHT = { y: '#7F9BE6', a: '#E57AA0' };   // tons claros validados (daltonismo e contraste)
+  const modes = ['cur','post'].filter(m => RH_SEL[m]);
+  const both = modes.length === 2;
+  const colorOf = m => (both && m === 'cur') ? LIGHT : BASE;
+  const NAME = { cur: 'Current', post: 'Post Div.' };
+  // texto dentro do segmento: branco ou tinta escura conforme a luminância da cor
+  const lum = h => { const c=[1,3,5].map(i=>parseInt(h.slice(i,i+2),16)/255).map(v=>v<=0.03928?v/12.92:((v+0.055)/1.055)**2.4); return .2126*c[0]+.7152*c[1]+.0722*c[2]; };
+  const ink = h => (1.05/(lum(h)+.05)) >= 4.5 ? '#FFFFFF' : '#221B20';
+
+  // legenda
+  $('rhLegend').innerHTML = both
+    ? `<span><i style="background:${LIGHT.y}"></i>Yduqs · Current</span><span><i style="background:${LIGHT.a}"></i>Afya · Current</span><span><i style="background:${BASE.y}"></i>Yduqs · Post Div.</span><span><i style="background:${BASE.a}"></i>Afya · Post Div.</span>`
+    : `<span><i style="background:${BASE.y}"></i>Yduqs' Shareholders</span><span><i style="background:${BASE.a}"></i>Afya's Shareholders</span><span class="muted">· ${NAME[modes[0]]}</span>`;
+
+  const avail = Math.max(280, $('rhScroll').clientWidth);
+  const padL = 40, padR = 8, padT = 10, padB = 28, H = 280;
+  const PAIR_GAP = 4;
+  const minSlot = both ? 58 : 34;
+  const W = Math.max(avail, padL + padR + days.length*minSlot);
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const slot = plotW / days.length;
+  const k = modes.length;
+  const bw = Math.min(56, Math.max(both ? 12 : 14, (slot*0.66 - (k-1)*PAIR_GAP) / k));
+  const groupW = k*bw + (k-1)*PAIR_GAP;
+  const y = v => padT + (1 - v) * plotH;
+  const GAP = 2, R = 4;
+  const labelEvery = Math.ceil(days.length / Math.max(1, Math.floor(plotW/52)));
+  let g = '';
+  for(const t of [0,.25,.5,.75,1]){
+    g += `<line class="grid-l" x1="${padL}" x2="${W-padR}" y1="${y(t)}" y2="${y(t)}"/>`;
+    g += `<text class="axis-t" x="${padL-6}" y="${y(t)+3.5}" text-anchor="end">${t*100}%</text>`;
+  }
+  // coluna com cantos de 4px apenas nas extremidades externas
+  const segPath = (x, y0, y1, roundTop, roundBot) => {
+    const h = y1 - y0; if(h <= 0) return '';
+    const rt = roundTop ? Math.min(R, h/2, bw/2) : 0, rb = roundBot ? Math.min(R, h/2, bw/2) : 0;
+    return `M${x},${y0+rt} Q${x},${y0} ${x+rt},${y0} L${x+bw-rt},${y0} Q${x+bw},${y0} ${x+bw},${y0+rt} L${x+bw},${y1-rb} Q${x+bw},${y1} ${x+bw-rb},${y1} L${x+rb},${y1} Q${x},${y1} ${x},${y1-rb} Z`;
+  };
+  const fits = bw >= 34;
+  days.forEach((d,i)=>{
+    const cx = padL + slot*i + slot/2, gx = cx - groupW/2;
+    modes.forEach((m, j)=>{
+      const v = d[m], col = colorOf(m), x = gx + j*(bw + PAIR_GAP), mx = x + bw/2;
+      // Afya na base, Yduqs no topo; 2px de superfície entre os segmentos
+      const yTopA = y(v.a), yBase = y(0), yTopY = y(1), yBotY = yTopA - GAP;
+      g += `<path d="${segPath(x, yTopA, yBase, false, true)}" fill="${col.a}"/>`;
+      g += `<path d="${segPath(x, yTopY, yBotY, true, false)}" fill="${col.y}"/>`;
+      if(fits && (yBase - yTopA) > 18) g += `<text class="seg-t" style="fill:${ink(col.a)}" x="${mx}" y="${(yTopA+yBase)/2+4}" text-anchor="middle">${fmt(v.a*100,1)}%</text>`;
+      if(fits && (yBotY - yTopY) > 18) g += `<text class="seg-t" style="fill:${ink(col.y)}" x="${mx}" y="${(yTopY+yBotY)/2+4}" text-anchor="middle">${fmt(v.y*100,1)}%</text>`;
+    });
+    if(i % labelEvery === 0 || i === days.length-1) g += `<text class="axis-t" x="${cx}" y="${H-8}" text-anchor="middle">${dayLabel(d.k)}</text>`;
+    const aria = modes.map(m=>`${NAME[m]}: Yduqs ${fmt(d[m].y*100,1)}%, Afya ${fmt(d[m].a*100,1)}%`).join('; ');
+    g += `<rect class="col-hit" data-i="${i}" x="${padL+slot*i}" y="${padT}" width="${slot}" height="${plotH}" tabindex="0" aria-label="${dayLabel(d.k)}. ${aria}"/>`;
+  });
+  box.innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Relação de troca no fechamento de cada dia, colunas 100% empilhadas">${g}</svg>`;
+  $('rhScroll').scrollLeft = $('rhScroll').scrollWidth;
+
+  const tip = $('rhTip');
+  const show = (el, evt) => {
+    box.querySelectorAll('.col-hit.on').forEach(n=>n.classList.remove('on')); el.classList.add('on');
+    const d = days[+el.dataset.i];
+    tip.innerHTML = `<div class="d">${dayLabel(d.k)}/${d.k.slice(0,4)}</div>` + modes.map(m=>{
+      const v = d[m], col = colorOf(m);
+      return `<div class="h">${NAME[m]}</div>
+        <div class="r"><span><span class="sw" style="background:${col.y}"></span>Yduqs</span><strong>${fmt(v.y*100,1)}%</strong></div>
+        <div class="r"><span><span class="sw" style="background:${col.a}"></span>Afya</span><strong>${fmt(v.a*100,1)}%</strong></div>`;
+    }).join('') + `<div class="m">UPDATE das ${hourLabel(d.r.created_at)} por ${esc(d.r.usuario||'—')}</div>`;
+    tip.hidden = false;
+    const rect = el.getBoundingClientRect();
+    const px = evt && evt.clientX ? evt.clientX : rect.left + rect.width/2;
+    const tw = tip.offsetWidth;
+    let left = px + 14; if(left + tw > window.innerWidth - 8) left = px - tw - 14;
+    tip.style.left = Math.max(8,left)+'px';
+    tip.style.top = Math.max(8, rect.top + 20)+'px';
+  };
+  const hide = () => { tip.hidden = true; box.querySelectorAll('.col-hit.on').forEach(n=>n.classList.remove('on')); };
+  box.querySelectorAll('.col-hit').forEach(el=>{
+    el.addEventListener('mousemove', e=> show(el, e));
+    el.addEventListener('mouseleave', hide);
+    el.addEventListener('focus', ()=> show(el));
+    el.addEventListener('blur', hide);
+    el.addEventListener('click', e=> show(el, e));
+  });
+
+  tbl.innerHTML = `<tr><th>Dia</th><th>UPDATE usado</th><th class="num">Yduqs Current</th><th class="num">Afya Current</th><th class="num">Yduqs Post Div.</th><th class="num">Afya Post Div.</th></tr>` +
+    [...days].reverse().map(d=>`<tr><td>${dayLabel(d.k)}/${d.k.slice(0,4)}</td><td>${hourLabel(d.r.created_at)} · ${esc(d.r.usuario||'—')}</td>
+      <td class="num-cell">${pct(d.cur.y)}</td><td class="num-cell">${pct(d.cur.a)}</td><td class="num-cell">${pct(d.post.y)}</td><td class="num-cell">${pct(d.post.a)}</td></tr>`).join('');
+}
+function renderRatioLines(){
   const box = $('rhChart'), days = dailyClose();
   const tbl = $('rhTable');
   if(!days.length){
@@ -848,6 +956,14 @@ function renderRatioHist(){
     [...days].reverse().map(d=>`<tr><td>${dayLabel(d.k)}/${d.k.slice(0,4)}</td><td>${hourLabel(d.r.created_at)} · ${esc(d.r.usuario||'—')}</td>
       <td class="num-cell">${pct(d.cur.y)}</td><td class="num-cell">${pct(d.cur.a)}</td><td class="num-cell">${pct(d.post.y)}</td><td class="num-cell">${pct(d.post.a)}</td></tr>`).join('');
 }
+// tipo de gráfico: linhas (padrão) ou colunas 100% empilhadas
+const RH_HINT = { line: 'Cada ponto é o último UPDATE feito no dia (horário de Brasília). Simulações não entram no gráfico. "Post Div." usa os dividendos gravados naquele UPDATE. Com Current e Post Div. marcados, Current aparece em tom claro e Post Div. na cor normal. O eixo vertical acompanha a faixa dos dados.', cols: 'Cada coluna usa o último UPDATE feito no dia (horário de Brasília). Simulações não entram no gráfico. "Post Div." usa os dividendos gravados naquele UPDATE. Com Current e Post Div. marcados, as colunas ficam lado a lado: Current em tom claro, Post Div. na cor normal.' };
+function renderRatioHist(){
+  $('rhChart').className = 'rh-chart ' + RH_TYPE;
+  $('rhHint').textContent = RH_HINT[RH_TYPE];
+  $('rhTip').hidden = true;
+  return RH_TYPE === 'cols' ? renderRatioCols() : renderRatioLines();
+}
 // seleção múltipla: Current, Post Div. ou os dois (sempre ao menos um marcado)
 document.querySelectorAll('[data-rh-mode]').forEach(b=> b.addEventListener('click', ()=>{
   const m = b.dataset.rhMode;
@@ -855,6 +971,12 @@ document.querySelectorAll('[data-rh-mode]').forEach(b=> b.addEventListener('clic
   if(!next.cur && !next.post){ toast('Deixe pelo menos uma opção marcada.'); return; }
   RH_SEL = next;
   document.querySelectorAll('[data-rh-mode]').forEach(x=>{ const on = !!RH_SEL[x.dataset.rhMode]; x.classList.toggle('active',on); x.setAttribute('aria-pressed',on); });
+  renderRatioHist();
+}));
+// alterna entre gráfico de linhas e de colunas
+document.querySelectorAll('[data-rh-type]').forEach(b=> b.addEventListener('click', ()=>{
+  RH_TYPE = b.dataset.rhType;
+  document.querySelectorAll('[data-rh-type]').forEach(x=>{ const on = x===b; x.classList.toggle('active',on); x.setAttribute('aria-checked',on); });
   renderRatioHist();
 }));
 let _rhT; window.addEventListener('resize', ()=>{ clearTimeout(_rhT); _rhT = setTimeout(()=>{ if(ME) renderRatioHist(); }, 150); });
